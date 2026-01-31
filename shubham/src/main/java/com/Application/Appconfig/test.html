@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Payment</title>
+    <script src="https://js.stripe.com/v3/"></script>
+</head>
+<body style="font-family: Arial; max-width: 500px; margin: 50px auto; padding: 20px;">
+<h2>Test Payment: ₹800.00</h2>
+
+<form id="payment-form">
+    <div id="card-element" style="border: 1px solid #ccc; padding: 10px; margin: 20px 0;"></div>
+    <button type="submit" style="background: #5469d4; color: white; border: none; padding: 12px 24px; width: 100%;">
+        Pay ₹800.00
+    </button>
+    <div id="error-message" style="color: red; margin-top: 10px;"></div>
+    <div id="success-message" style="color: green; margin-top: 10px;"></div>
+</form>
+
+<script>
+    // Replace these with your actual values
+    const PUBLISHABLE_KEY = 'pk_test_51SsOhcBWofEcT6tmyxC2ffn0psnpyWWuX0OuVjjw6XGvdKIMxnkFup7AR8C8guRa5d5bQ6YGrGPnVIqJZn4qmGun001yQKyyOR';  // From application.properties
+    const CLIENT_SECRET = 'pi_3SsdnoBWofEcT6tm0S3mTCKO_secret_mnkRBBzvggvGIhyZGFYEHOxtb';    // From create-payment-intent response
+
+    const stripe = Stripe(PUBLISHABLE_KEY);
+    const elements = stripe.elements();
+    const cardElement = elements.create('card');
+    cardElement.mount('#card-element');
+
+    const form = document.getElementById('payment-form');
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const {error, paymentIntent} = await stripe.confirmCardPayment(CLIENT_SECRET, {
+            payment_method: {card: cardElement}
+        });
+
+        if (error) {
+            document.getElementById('error-message').textContent = error.message;
+        } else {
+            document.getElementById('success-message').textContent = '✅ Payment successful!';
+            console.log('Payment completed:', paymentIntent.id);
+        }
+    });
+</script>
+</body>
+</html>
