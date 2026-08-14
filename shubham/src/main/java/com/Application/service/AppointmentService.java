@@ -4,7 +4,9 @@ import com.Application.dto.*;
 import com.Application.entity.Appointment;
 import com.Application.entity.Doctor;
 import com.Application.entity.Patient;
+import com.Application.entity.User;
 import com.Application.entity.type.AppointmentStatus;
+import com.Application.entity.type.Role;
 import com.Application.error.AppointmentNotFoundException;
 import com.Application.error.BusinessRuleViolationException;
 import com.Application.error.DoctorNotFoundException;
@@ -15,6 +17,8 @@ import com.Application.repository.PatientRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -32,9 +36,18 @@ public class AppointmentService {
     private final PatientRepository patientRepository;
     private final DoctorRepository doctorRepository;
     private final BillingService billingService;
+
+    @Transactional
     public AppointmentResponse bookApplication(AppointmentRequest request) {
-        Patient patient = patientRepository.findById(request.getPatientId()).orElseThrow(()->
-                new PatientNotFoundException("Patient Not found with id: "+request.getPatientId()+" for Booking appointment"));
+
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        User curentLoggedUser = (User)authentication.getPrincipal();
+        Patient patient = curentLoggedUser.getPatient();
+
+        if(patient == null){
+            throw new PatientNotFoundException("Patient not found for current user");
+        }
+
         Doctor doctor = doctorRepository.findById(request.getDoctorId()).orElseThrow(()->
                 new DoctorNotFoundException("Doctor Not Found with Id "+request.getDoctorId()+" for Booking appointment"));
 
@@ -46,22 +59,23 @@ public class AppointmentService {
                 .prescription(null)
                 .patient(patient)
                 .doctor(doctor)
+                .startTime(request.getAppointment_date())
+                .endTime(request.getAppointment_date().plusMinutes(DEFAULT_APPOINTMENT_MINUTES))
                 .appointmentType(request.getAppointmentType())
                 .build();
 
-        if (appointment.getStartTime() != null) {
-            appointment.setStartTime(appointment.getStartTime());
-        }else{
-            appointment.setStartTime(LocalDateTime.now());
-        }
-        appointment.setEndTime(appointment.getStartTime().plusMinutes(DEFAULT_APPOINTMENT_MINUTES));
         appointmentRepository.save(appointment);
 
         return mapToAppointmentResponse(appointment);
     }
-    public AppointmentResponse confirmAppointment(Long appointmentId, Long doctorId) {
+    public AppointmentResponse confirmAppointment(Long appointmentId) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        User currentLoggedUser = (User) authentication.getPrincipal();
+
+
         Appointment appointment = appointmentRepository.findById(appointmentId).orElseThrow(()->
                 new AppointmentNotFoundException("Appointment Not found with id "+appointmentId+ " to Confirm the Appointment"));
+        Long doctorId = currentLoggedUser.getDoctor().getId();
 
         if(!doctorId.equals(appointment.getDoctor().getId())){
             throw new BusinessRuleViolationException("Unauthorized .. only doctor with id "+appointment.getDoctor().getId()+" can confirm appointment");
@@ -75,14 +89,19 @@ public class AppointmentService {
     }
     @Transactional
     public AppointmentResponse cancelAppointment(CancellationRequest request) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        User curentLoggedUser = (User)authentication.getPrincipal();
+
+        Long currentUserId = curentLoggedUser.getId();
+
         Appointment appointment = appointmentRepository.findById(request.getAppointmentId()).orElseThrow(() ->
                 new AppointmentNotFoundException("Appointment not found with id "+request.getAppointmentId()+" to Cancel appointment"));
 
-        boolean isPatient = appointment.getPatient().getUser().getId().equals(request.getUserId());
-        boolean isDoctor = appointment.getDoctor().getUser().getId().equals(request.getUserId());
+        boolean isPatient = curentLoggedUser.getRole() == Role.PATIENT && appointment.getPatient().getUser().getId().equals(currentUserId);
+        boolean isDoctor = curentLoggedUser.getRole() == Role.DOCTOR && appointment.getDoctor().getUser().getId().equals(currentUserId);
 
         if(!isPatient && !isDoctor){
-            throw new BusinessRuleViolationException("Unauthorize .. this user cannot cancel appointment");
+            throw new BusinessRuleViolationException("Unauthorized: you cannot cancel this appointment");
         }
         if(appointment.getStatus() == AppointmentStatus.COMPLETED){
             throw new BusinessRuleViolationException("cannot cancel complete appointment");
@@ -103,14 +122,26 @@ public class AppointmentService {
         return mapToAppointmentResponse(appointment);
 
     }
+    @Transactional
     public AppointmentResponse completeAppointment(CompleteRequest request) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+
+        User curentLoggedUser = (User) authentication.getPrincipal();
+
         Appointment appointment = appointmentRepository.findById(request.getAppointmentId()).orElseThrow(() ->
                 new AppointmentNotFoundException("Appointment not found with id "+request.getAppointmentId()));
+        if(!curentLoggedUser.getDoctor().getId().equals(appointment.getDoctor().getId())){
+            throw new BusinessRuleViolationException("Unauthorized ... you cant complete appointment");
+        }
+
 
         if (appointment.getStatus() != AppointmentStatus.CONFIRMED) {
             throw new BusinessRuleViolationException(
                     "Can only complete CONFIRMED appointments. Current status: " + appointment.getStatus()
             );
+        }
+        if(LocalDateTime.now().isBefore(appointment.getEndTime())){
+            throw new BusinessRuleViolationException( "Cannot complete appointment before it ends");
         }
 
         appointment.setPrescription(request.getPrescription());

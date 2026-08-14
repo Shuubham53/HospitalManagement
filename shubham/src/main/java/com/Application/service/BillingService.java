@@ -28,16 +28,14 @@ public class BillingService {
     public BigDecimal calculateAmount(Appointment appointment){
         long minutes = Duration.between(appointment.getStartTime(), appointment.getEndTime()).toMinutes();
         log.info("Duration of Appointment {}",minutes);
-        int slotMinutes = 30;
-        BigDecimal feePerSlot = new BigDecimal("500");
+        BigDecimal amount = new BigDecimal("500");
 
-        long slots = (minutes + slotMinutes - 1) / slotMinutes;
-        BigDecimal amount = feePerSlot.multiply(BigDecimal.valueOf(slots));
-        if(appointment.getAppointmentType() == AppointmentType.EMERGENCY){
-            amount = amount.add(BigDecimal.valueOf(300));
+        if (appointment.getAppointmentType() == AppointmentType.EMERGENCY) {
+            amount = amount.add(new BigDecimal("300"));
         }
-        if(appointment.getAppointmentType() == AppointmentType.FOLLOW_UP){
-            amount = amount.subtract(BigDecimal.valueOf(200));
+
+        if (appointment.getAppointmentType() == AppointmentType.FOLLOW_UP) {
+            amount = amount.subtract(new BigDecimal("200"));
         }
         log.info("Amount to pay {}",amount);
         return amount;
@@ -135,21 +133,7 @@ public class BillingService {
         return mapToBillingResponse(billing);
     }
 
-    public BillingResponse refundBill(Long billId) {
-        Billing billing = billingRepository.findById(billId).orElseThrow(() ->
-                new BillNotFoundException("Bill not found for payment"));
 
-        if(billing.getStatus() != PaymentStatus.PAID){
-            throw new IllegalStateException("Bill must be Paid for refund but status is "+billing.getStatus());
-        }
-
-        billing.setStatus(PaymentStatus.REFUNDED);
-        billing.setPaidAt(null);
-        billingRepository.save(billing);
-
-        log.info("Bill refunded for bill ID: {}", billId);
-        return mapToBillingResponse(billing);
-    }
 
     // Helper method for PaymentService
     public Billing getBillingByAppointment(Appointment appointment) {

@@ -16,7 +16,6 @@ import java.time.LocalDateTime;
 @Getter
 @Setter
 public class AppointmentRequest {
-    private Long patientId;
     private Long doctorId;
     private LocalDateTime appointment_date;
     private String reason;

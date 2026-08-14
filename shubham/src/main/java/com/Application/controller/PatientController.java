@@ -53,9 +53,15 @@ public class PatientController {
 
     /// Patient
     @GetMapping("/patient/appointment")
-    public ResponseEntity<List<AppointmentPatientResponse>> getAllAppointmentByPatientId(){
-        List<AppointmentPatientResponse> responses = patientService.getAppointmentsByPatientId();
+    public ResponseEntity<List<AppointmentPatientResponse>> getMyAppointments(){
+        List<AppointmentPatientResponse> responses = patientService.getMyAppointments();
         return ResponseEntity.ok(responses);
+    }
+    
+    @GetMapping("/patient/{patientId}")
+    public ResponseEntity<PatientResponse> getPatientById(@PathVariable Long patientId){
+        PatientResponse response = patientService.getPateintById(patientId);
+        return ResponseEntity.ok(response);
     }
 
 

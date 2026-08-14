@@ -8,11 +8,12 @@ import com.Application.entity.User;
 import com.Application.entity.type.AppointmentStatus;
 import com.Application.entity.type.Role;
 import com.Application.error.DoctorNotFoundException;
+import com.Application.error.EmailAlreadyExistException;
 import com.Application.repository.AppointmentRepository;
 import com.Application.repository.DoctorRepository;
 import com.Application.repository.UserRepository;
-import com.fasterxml.jackson.annotation.JsonFormat;
-import jakarta.transaction.Transactional;
+
+import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.apache.catalina.security.SecurityUtil;
 import org.springframework.security.core.Authentication;
@@ -31,7 +32,13 @@ public class DoctorService {
     private final DoctorRepository doctorRepository;
     private final PasswordEncoder passwordEncoder;
     private final AppointmentRepository appointmentRepository;
+
+    @Transactional
     public DoctorResponse createDoctor(DoctorRequest request) {
+
+        if(userRepository.existsByUsername(request.getEmail())){
+            throw new  EmailAlreadyExistException("User already exist with email: "+request.getEmail());
+        }
         User user = User.builder()
                 .username(request.getEmail())
                 .password(passwordEncoder.encode(request.getPassword()))
@@ -145,7 +152,7 @@ public class DoctorService {
                 .id(appointment.getId())
                 .appointmentDate(appointment.getAppointment_date())
                 .status(appointment.getStatus())
-                .patientId(appointment.getId())
+                .patientId(appointment.getPatient().getId())
                 .patientName(appointment.getPatient().getFirst_name()+" "+appointment.getPatient().getLast_name())
                 .patientEmail(appointment.getPatient().getEmail())
                 .patientPhone(appointment.getPatient().getPhone())
