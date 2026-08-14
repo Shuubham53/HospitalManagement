@@ -1,0 +1,14 @@
+{
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Spring Boot-HospitalManagementApplication<shubham>",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "mainClass": "com.Application.HospitalManagementApplication",
+            "projectName": "shubham",
+            "args": "",
+            "envFile": "${workspaceFolder}/.env"
+        }
+    ]
+}

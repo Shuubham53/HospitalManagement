@@ -21,9 +21,13 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity httpSecurity) throws Exception {
         httpSecurity
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/patient/register","/doctor/register", "/auth/**","/status")
+                        .requestMatchers("/patient/register",
+                                "/doctor/register",
+                                "/auth/**",
+                                "/status",
+                                "/payments/webhook"
+                                )
                         .permitAll()
-                        .requestMatchers("/appointment/**","/payments/**").permitAll()
                         .anyRequest().authenticated())
                 .csrf(csrfConfig -> csrfConfig.disable())
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)

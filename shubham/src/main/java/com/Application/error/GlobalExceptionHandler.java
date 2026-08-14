@@ -86,6 +86,17 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(apiError);
     }
 
+    @ExceptionHandler(EmailAlreadyExistException.class)
+    public ResponseEntity<ApiError> handleEmailAlreadyExistException(EmailAlreadyExistException exception){
+        ApiError apiError = ApiError.builder()
+                .timestamp(LocalDateTime.now())
+                .error("Email Conflict")
+                .message(exception.getMessage())
+                .status(HttpStatus.CONFLICT.value())
+                .build();
+        return new ResponseEntity<>(apiError,HttpStatus.CONFLICT);
+    }
+
 
 }
 

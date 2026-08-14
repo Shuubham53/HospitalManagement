@@ -15,6 +15,10 @@ import com.Application.repository.UserRepository;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -25,6 +29,7 @@ import java.util.List;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class PatientService {
     private final UserRepository userRepository;
     private final PatientRepository patientRepository;
@@ -46,13 +51,23 @@ public class PatientService {
 
         return toDto(patient);
     }
+
+    @Cacheable(value = "patients",key = "#patientId")
+    public PatientResponse getPateintById(Long patientId){
+        Patient patient = patientRepository.findById(patientId)
+            .orElseThrow(() -> new PatientNotFoundException("Patient not found with tghis id"));
+        return toDto(patient);
+    }
+    @Cacheable(value = "patients")
     public List<PatientResponse> getAllPatient() {
+        log.info("fetching all patients from database");
         List<Patient> patients = patientRepository.findAll();
         List<PatientResponse> responses = patients.stream()
                 .map(this::toDto).toList();
         return responses;
     }
 
+    @Cacheable(value = "patients")
     public PatientResponse getCurrentPatient() {
         User currentUser = (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         Patient patient = currentUser.getPatient();
@@ -60,7 +75,7 @@ public class PatientService {
         PatientResponse response = toDto(patient);
         return response;
     }
-
+    @CachePut(value = "patients",key = "#result.id")
     @Transactional
     public PatientResponse updatePatient(PatientRequest request) {
         User currentUser =  (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
@@ -96,11 +111,11 @@ public class PatientService {
         patientRepository.delete(patient);
     }
 
-    public List<AppointmentPatientResponse> getAppointmentsByPatientId() {
+    public List<AppointmentPatientResponse> getMyAppointments() {
 
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         User currentUser = (User) authentication.getPrincipal();
-        Long patientId = currentUser.getId();
+        Long patientId = currentUser.getPatient().getId();
         List<Appointment> appointments =
                 appointmentRepository.findAllByPatientId(patientId);
         List<AppointmentPatientResponse> responses = appointments.stream()

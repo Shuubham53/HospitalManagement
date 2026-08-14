@@ -4,9 +4,11 @@ import com.Application.dto.PaymentRequest;
 import com.Application.dto.PaymentResponse;
 import com.Application.dto.RefundRequest;
 import com.Application.entity.Billing;
+import com.Application.entity.User;
 import com.Application.entity.type.PaymentMethod;
 import com.Application.entity.type.PaymentStatus;
 import com.Application.error.BillNotFoundException;
+import com.Application.error.BusinessRuleViolationException;
 import com.Application.repository.BillingRepository;
 import com.stripe.exception.StripeException;
 import com.stripe.model.PaymentIntent;
@@ -16,6 +18,8 @@ import com.stripe.param.RefundCreateParams;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,24 +44,34 @@ public class PaymentService {
     public PaymentResponse createPaymentIntent(PaymentRequest request) {
         log.info("Creating payment intent for bill ID: {}", request.getBillId());
 
-        // Get billing
-        Billing billing = billingService.getBillingEntity(request.getBillId());
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        User currentLoggedUser = (User)authentication.getPrincipal();
+        Long patientId = currentLoggedUser.getPatient().getId();
 
-        // Validate billing status
+        Billing billing = billingService.getBillingEntity(request.getBillId());
+        Long billingPatientId = billing.getPatient().getId();
+
+        if(patientId.equals(billingPatientId)){
+            throw new BusinessRuleViolationException("Unauthorize ...you dont have access to create payment");
+        }
+
         if(billing.getStatus() != PaymentStatus.UNPAID && billing.getStatus() != PaymentStatus.FAILED){
             throw new IllegalStateException("Cannot create payment intent. Bill status: " + billing.getStatus());
         }
 
-        // Check if payment already initiated
         if(billing.getReferenceNumber() != null && billing.getStatus() == PaymentStatus.CREATED){
             throw new IllegalStateException("Payment already initiated for this bill");
         }
+        if (billing.getAmount() == null ||
+                billing.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BusinessRuleViolationException(
+                    "Payment amount must be greater than zero"
+            );
+        }
 
         try {
-            // Use provided currency or default
-            String currency = request.getCurrency() != null ? request.getCurrency() : defaultCurrency;
+            String currency = defaultCurrency;
 
-            // Create Stripe Payment Intent
             PaymentIntentCreateParams params = PaymentIntentCreateParams.builder()
                     .setAmount(billing.getAmount().multiply(new BigDecimal(100)).longValue()) // Convert to smallest unit
                     .setCurrency(currency.toLowerCase())
@@ -74,7 +88,6 @@ public class PaymentService {
 
             PaymentIntent paymentIntent = PaymentIntent.create(params);
 
-            // Update billing with Stripe reference
             billing.setReferenceNumber(paymentIntent.getId());
             billing.setStatus(PaymentStatus.CREATED);
             billing.setPaymentMethod(PaymentMethod.CARD);

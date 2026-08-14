@@ -8,6 +8,7 @@ import com.Application.error.ResourceNotFoundException;
 import com.Application.repository.InventoryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.context.config.ConfigDataResourceNotFoundException;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -33,19 +34,34 @@ public class InventoryService {
         return mapToInventoryResponse(inventory);
     }
     public InventoryStatus calculateStatus(Integer quantity, Integer reorderLevel, LocalDate expirationTime){
-        if(quantity <= reorderLevel){
-            return InventoryStatus.LOW_STOCK;
+
+        if  (expirationTime != null &&
+                expirationTime.isBefore(LocalDate.now())) {
+            return InventoryStatus.EXPIRED;
         }
         else if (quantity == 0){
             return InventoryStatus.OUT_OF_STOCK;
         }
-        else if  (expirationTime != null &&
-                expirationTime.isBefore(LocalDate.now())) {
-            return InventoryStatus.EXPIRED;
+        else if(quantity <= reorderLevel){
+            return InventoryStatus.LOW_STOCK;
         }
 
-
         return InventoryStatus.AVAILABLE;
+    }
+
+    @Scheduled(cron = "0 0 0 * * *")
+    public void updateExpiredInventory(){
+        List<Inventory> inventories =
+                inventoryRepository.findByExpirationDateBeforeAndStatusIn(
+                        LocalDate.now(),
+                        List.of(InventoryStatus.LOW_STOCK,InventoryStatus.AVAILABLE)
+                );
+        for(Inventory inventory : inventories){
+            inventory.setStatus(InventoryStatus.EXPIRED);
+        }
+
+        inventoryRepository.saveAll(inventories);
+
     }
 
     public InventoryResponse mapToInventoryResponse(Inventory inventory){
