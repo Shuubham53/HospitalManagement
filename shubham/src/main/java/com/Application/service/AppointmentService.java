@@ -17,12 +17,14 @@ import com.Application.repository.PatientRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 
@@ -37,12 +39,21 @@ public class AppointmentService {
     private final DoctorRepository doctorRepository;
     private final BillingService billingService;
 
+    @Value("${hospital.open.time}")
+    private LocalTime hospitalOpenTime;
+    @Value("${hospital.close.time}")
+    private LocalTime hospitalCloseTime;
+
+
     @Transactional
     public AppointmentResponse bookApplication(AppointmentRequest request) {
+
+
 
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         User curentLoggedUser = (User)authentication.getPrincipal();
         Patient patient = curentLoggedUser.getPatient();
+
 
         if(patient == null){
             throw new PatientNotFoundException("Patient not found for current user");
@@ -51,6 +62,31 @@ public class AppointmentService {
         Doctor doctor = doctorRepository.findById(request.getDoctorId()).orElseThrow(()->
                 new DoctorNotFoundException("Doctor Not Found with Id "+request.getDoctorId()+" for Booking appointment"));
 
+        LocalDateTime startTime = request.getAppointment_date();
+        LocalDateTime endTime = request.getAppointment_date().plusMinutes(DEFAULT_APPOINTMENT_MINUTES);
+
+        if (startTime.isBefore(LocalDateTime.now())) {
+            throw new BusinessRuleViolationException(
+                    "Cannot book an appointment in the past"
+            );
+        }
+
+        if(startTime.toLocalTime().isBefore(hospitalOpenTime) || endTime.toLocalTime().isAfter(hospitalCloseTime)){
+            throw new BusinessRuleViolationException("You cannot book appointment in this hours");
+        }
+
+        boolean exists = appointmentRepository.existsOverlappingAppointment(
+                doctor.getId(),
+                AppointmentStatus.CANCELLED,
+                startTime,
+                endTime
+        );
+
+        if (exists) {
+            throw new BusinessRuleViolationException(
+                    "Doctor is not available at the requested time"
+            );
+        }
 
         Appointment appointment = Appointment.builder()
                 .appointment_date(request.getAppointment_date())
@@ -59,8 +95,8 @@ public class AppointmentService {
                 .prescription(null)
                 .patient(patient)
                 .doctor(doctor)
-                .startTime(request.getAppointment_date())
-                .endTime(request.getAppointment_date().plusMinutes(DEFAULT_APPOINTMENT_MINUTES))
+                .startTime(startTime)
+                .endTime(endTime)
                 .appointmentType(request.getAppointmentType())
                 .build();
 
@@ -68,6 +104,7 @@ public class AppointmentService {
 
         return mapToAppointmentResponse(appointment);
     }
+
     public AppointmentResponse confirmAppointment(Long appointmentId) {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         User currentLoggedUser = (User) authentication.getPrincipal();

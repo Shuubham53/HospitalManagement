@@ -12,6 +12,5 @@ import java.math.BigDecimal;
 @NoArgsConstructor
 public class RefundRequest {
     private String paymentIntentId;
-    private BigDecimal amount; // Optional: null for full refund
     private String reason; // Optional: "requested_by_customer", "duplicate", "fraudulent"
 }

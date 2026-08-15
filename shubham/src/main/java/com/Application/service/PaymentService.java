@@ -51,7 +51,7 @@ public class PaymentService {
         Billing billing = billingService.getBillingEntity(request.getBillId());
         Long billingPatientId = billing.getPatient().getId();
 
-        if(patientId.equals(billingPatientId)){
+        if(!patientId.equals(billingPatientId)){
             throw new BusinessRuleViolationException("Unauthorize ...you dont have access to create payment");
         }
 
@@ -117,11 +117,49 @@ public class PaymentService {
         try {
             PaymentIntent paymentIntent = PaymentIntent.retrieve(paymentIntentId);
 
+            String metadataBillingId = paymentIntent.getMetadata().get("billingId");
+            String metadataPatientId = paymentIntent.getMetadata().get("patientId");
+
+            if (metadataBillingId == null || metadataPatientId == null) {
+                throw new BusinessRuleViolationException(
+                        "Payment intent metadata is invalid"
+                );
+            }
+
+            Long billingId = Long.valueOf(metadataBillingId);
+            Long patientId = Long.valueOf(metadataPatientId);
+
             Billing billing = billingRepository.findByReferenceNumber(paymentIntentId)
                     .orElseThrow(() -> new BillNotFoundException(
                             "No billing found for payment intent: " + paymentIntentId));
 
-            // Update billing based on payment status
+            if (!billingId.equals(billing.getId())) {
+                throw new BusinessRuleViolationException(
+                        "Payment intent does not belong to this billing"
+                );
+            }
+
+            if (!patientId.equals(billing.getPatient().getId())) {
+                throw new BusinessRuleViolationException(
+                        "Payment intent does not belong to this patient"
+                );
+            }
+
+            BigDecimal paidAmount = BigDecimal.valueOf(paymentIntent.getAmount())
+                    .divide(BigDecimal.valueOf(100));
+
+            if (billing.getAmount().compareTo(paidAmount) != 0) {
+                throw new BusinessRuleViolationException(
+                        "Payment amount does not match billing amount"
+                );
+            }
+            if(!defaultCurrency.equalsIgnoreCase(paymentIntent.getCurrency())){
+                throw new BusinessRuleViolationException( "Payment currency does not match billing currency");
+            }
+
+            if(billing.getStatus() == PaymentStatus.PAID || billing.getStatus() == PaymentStatus.REFUNDED){
+                return billing;
+            }
             switch (paymentIntent.getStatus()) {
                 case "succeeded":
                     billing.setStatus(PaymentStatus.PAID);
@@ -175,16 +213,11 @@ public class PaymentService {
             throw new IllegalStateException("Cannot refund bill with status: " + billing.getStatus());
         }
 
+
         try {
             RefundCreateParams.Builder paramsBuilder = RefundCreateParams.builder()
                     .setPaymentIntent(request.getPaymentIntentId());
 
-            // Add amount if partial refund
-            if (request.getAmount() != null) {
-                paramsBuilder.setAmount(
-                        request.getAmount().multiply(new BigDecimal(100)).longValue()
-                );
-            }
 
             // Add reason if provided
             if (request.getReason() != null) {
@@ -201,18 +234,20 @@ public class PaymentService {
 
             if ("succeeded".equals(refund.getStatus())) {
                 billing.setStatus(PaymentStatus.REFUNDED);
-                billing.setPaidAt(null);
                 log.info("Refund succeeded for bill ID: {}", billing.getId());
             } else if ("pending".equals(refund.getStatus())) {
-                billing.setStatus(PaymentStatus.PENDING);
-                log.info("Refund pending for bill ID: {}", billing.getId());
+                log.info("Refund is still pending for bill ID: {}", billing.getId());
+
+                throw new BusinessRuleViolationException(
+                        "Refund is still being processed"
+                );
             }
 
             return billingRepository.save(billing);
 
         } catch (StripeException e) {
             log.error("Stripe error while processing refund: {}", e.getMessage());
-            throw new IllegalStateException("Failed to process refund: " + e.getMessage(), e);
+            throw new BusinessRuleViolationException("Failed to process refund: " + e.getMessage());
         }
     }
 
