@@ -44,19 +44,19 @@ public class PaymentController {
         }
     }
 
-    @PostMapping("/confirm")
-    public ResponseEntity<?> confirmPayment(@RequestBody PaymentConfirmRequest request) {
-        try {
-            log.info("Received payment confirmation request for payment intent: {}",
-                    request.getPaymentIntentId());
-            Billing billing = paymentService.confirmPayment(request.getPaymentIntentId());
-            return ResponseEntity.ok(billingService.mapToBillingResponse(billing));
-        } catch (Exception e) {
-            log.error("Error confirming payment: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body("Payment confirmation error: " + e.getMessage());
-        }
-    }
+//    @PostMapping("/confirm")
+//    public ResponseEntity<?> confirmPayment(@RequestBody PaymentConfirmRequest request) {
+//        try {
+//            log.info("Received payment confirmation request for payment intent: {}",
+//                    request.getPaymentIntentId());
+//            Billing billing = paymentService.confirmPayment(request.getPaymentIntentId());
+//            return ResponseEntity.ok(billingService.mapToBillingResponse(billing));
+//        } catch (Exception e) {
+//            log.error("Error confirming payment: {}", e.getMessage());
+//            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+//                    .body("Payment confirmation error: " + e.getMessage());
+//        }
+//    }
 
     @PostMapping("/refund")
     public ResponseEntity<?> refundPayment(@RequestBody RefundRequest request) {

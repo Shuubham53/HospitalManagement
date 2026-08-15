@@ -7,6 +7,7 @@ import com.Application.entity.Patient;
 import com.Application.entity.User;
 import com.Application.entity.type.AppointmentStatus;
 import com.Application.entity.type.Role;
+import com.Application.error.BusinessRuleViolationException;
 import com.Application.error.DoctorNotFoundException;
 import com.Application.error.EmailAlreadyExistException;
 import com.Application.repository.AppointmentRepository;
@@ -96,11 +97,16 @@ public class DoctorService {
         return mapToResponse(doctor);
     }
 
-    public void deleteDoctor() {
-        User currentUser = (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        Doctor doctor = currentUser.getDoctor();
-        if(doctor == null){
-            throw new DoctorNotFoundException("Doctor profile missing for Deletion");
+    @Transactional
+    public void deleteDoctor(Long doctorId) {
+
+        Doctor doctor = doctorRepository.findById(doctorId).orElseThrow(
+                () -> new DoctorNotFoundException("Doctor Not found with Id: "+doctorId)
+        );
+
+        List<Appointment> appointments = appointmentRepository.findByDoctorId(doctor.getId());
+        if(!appointments.isEmpty()){
+            throw new BusinessRuleViolationException("You cannot delete doctor with id: "+doctor.getId()+"it has appointment records");
         }
         User user = doctor.getUser();
         doctorRepository.delete(doctor);

@@ -24,9 +24,9 @@ public class AppointmentController {
 
 
     /// DOCTOR
-    @PutMapping("/doctor/{doctorId}/appointment/{appointmentId}/confirm")
-    public ResponseEntity<AppointmentResponse> confirmAppointment(@PathVariable Long doctorId,@PathVariable Long appointmentId){
-        AppointmentResponse appointmentResponse = appointmentService.confirmAppointment(appointmentId,doctorId);
+    @PutMapping("/appointment/{appointmentId}/confirm")
+    public ResponseEntity<AppointmentResponse> confirmAppointment(@PathVariable Long appointmentId){
+        AppointmentResponse appointmentResponse = appointmentService.confirmAppointment(appointmentId);
         return ResponseEntity.ok(appointmentResponse);
     }
 
