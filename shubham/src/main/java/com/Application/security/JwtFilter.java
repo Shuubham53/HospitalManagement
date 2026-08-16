@@ -17,27 +17,39 @@ import java.io.IOException;
 @Component
 @RequiredArgsConstructor
 public class JwtFilter extends OncePerRequestFilter {
+
     private final AuthUtil authUtil;
     private final UserRepository userRepository;
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
+
         String requestHeader = request.getHeader("Authorization");
-        String token = null;
-        if(requestHeader == null || !requestHeader.startsWith("Bearer ")){
-            filterChain.doFilter(request,response);
+        if (requestHeader == null || !requestHeader.startsWith("Bearer ")) {
+            filterChain.doFilter(request, response);
             return;
         }
-        token = requestHeader.substring(7);
+        String token = requestHeader.substring(7);
         String username = authUtil.extractUsernameFromToken(token);
+        if (username != null &&
+                SecurityContextHolder.getContext().getAuthentication() == null) {
 
-        if(username != null && SecurityContextHolder.getContext().getAuthentication() == null){
-            User user = userRepository.findByUsername(username).orElseThrow(() ->
-                    new IllegalArgumentException("User not found with username: "+username));
+            User user = userRepository.findByUsernameAndActiveTrue(username).orElseThrow(() ->
+                            new IllegalArgumentException("User not found with username: " + username));
+
+            if (!user.isEnabled()) {
+                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                response.setContentType("application/json");
+                response.getWriter().write(
+                        "{\"error\":\"Account is inactive\"}"
+                );
+                return;
+            }
             UsernamePasswordAuthenticationToken authenticationToken =
-                    new UsernamePasswordAuthenticationToken(user,null,user.getAuthorities());
-
-            SecurityContextHolder.getContext().setAuthentication(authenticationToken);
+                    new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities());
+            SecurityContextHolder.getContext()
+                    .setAuthentication(authenticationToken);
         }
-        filterChain.doFilter(request,response);
+        filterChain.doFilter(request, response);
     }
 }

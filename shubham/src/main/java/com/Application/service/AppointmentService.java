@@ -48,10 +48,12 @@ public class AppointmentService {
     @Transactional
     public AppointmentResponse bookApplication(AppointmentRequest request) {
 
-
-
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        User curentLoggedUser = (User)authentication.getPrincipal();
+        User curentLoggedUser = (User)SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        if (curentLoggedUser.getRole() != Role.PATIENT) {
+            throw new BusinessRuleViolationException(
+                    "Only patients can book appointments"
+            );
+        }
         Patient patient = curentLoggedUser.getPatient();
 
 
@@ -59,7 +61,7 @@ public class AppointmentService {
             throw new PatientNotFoundException("Patient not found for current user");
         }
 
-        Doctor doctor = doctorRepository.findById(request.getDoctorId()).orElseThrow(()->
+        Doctor doctor = doctorRepository.findByIdAndUser_ActiveTrue(request.getDoctorId()).orElseThrow(()->
                 new DoctorNotFoundException("Doctor Not Found with Id "+request.getDoctorId()+" for Booking appointment"));
 
         LocalDateTime startTime = request.getAppointment_date();

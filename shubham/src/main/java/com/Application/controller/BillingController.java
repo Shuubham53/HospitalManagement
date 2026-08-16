@@ -55,10 +55,6 @@ public class BillingController {
         return ResponseEntity.ok(billingService.payBillCash(billId));
     }
 
-    @PutMapping("/billings/{billId}/refund")
-    public ResponseEntity<BillingResponse> refundBill( @PathVariable Long billId){
-        return ResponseEntity.ok(billingService.refundBill(billId));
-    }
 
 
 
