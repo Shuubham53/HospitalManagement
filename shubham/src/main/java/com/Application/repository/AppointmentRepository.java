@@ -32,4 +32,8 @@ public interface AppointmentRepository extends JpaRepository<Appointment,Long> {
             @Param("newStartTime") LocalDateTime newStartTime,
             @Param("newEndTime") LocalDateTime newEndTime
     );
+
+    List<Appointment> findByPatientIdAndStatus(Long patientId, AppointmentStatus status);
+
+    List<Appointment> findByDoctorIdAndStatus(Long doctorId, AppointmentStatus status);
 }

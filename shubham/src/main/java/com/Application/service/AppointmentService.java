@@ -14,7 +14,7 @@ import com.Application.error.PatientNotFoundException;
 import com.Application.repository.AppointmentRepository;
 import com.Application.repository.DoctorRepository;
 import com.Application.repository.PatientRepository;
-import jakarta.transaction.Transactional;
+import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -105,9 +105,17 @@ public class AppointmentService {
         return mapToAppointmentResponse(appointment);
     }
 
+
+    @Transactional
     public AppointmentResponse confirmAppointment(Long appointmentId) {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         User currentLoggedUser = (User) authentication.getPrincipal();
+
+        if(currentLoggedUser.getRole() != Role.DOCTOR || currentLoggedUser.getDoctor() == null){
+            throw new BusinessRuleViolationException(
+                    "Only a doctor can confirm an appointment"
+            );
+        }
 
 
         Appointment appointment = appointmentRepository.findById(appointmentId).orElseThrow(()->
@@ -164,6 +172,11 @@ public class AppointmentService {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 
         User curentLoggedUser = (User) authentication.getPrincipal();
+        if (curentLoggedUser.getRole() != Role.DOCTOR || curentLoggedUser.getDoctor() == null) {
+            throw new BusinessRuleViolationException(
+                    "Only a doctor can complete an appointment"
+            );
+        }
 
         Appointment appointment = appointmentRepository.findById(request.getAppointmentId()).orElseThrow(() ->
                 new AppointmentNotFoundException("Appointment not found with id "+request.getAppointmentId()));
@@ -207,31 +220,109 @@ public class AppointmentService {
 
 
     public List<AppointmentResponse> getAllAppointments() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        User currentLoggedUser = (User) authentication.getPrincipal();
+        if(currentLoggedUser.getRole() != Role.ADMIN){
+            throw new BusinessRuleViolationException("Unauthorize ..Only Admin can see appointments");
+        }
         List<Appointment>appointments = appointmentRepository.findAll();
         return appointments.stream()
                 .map(this::mapToAppointmentResponse).toList();
     }
 
     public List<AppointmentResponse> getAppointmentsByPatientId(Long patientId) {
+
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        User currentLoggedUser = (User) authentication.getPrincipal();
+
+
+        if(currentLoggedUser.getRole() == Role.ADMIN){
+            List<Appointment> appointments = appointmentRepository.findAllByPatientId(patientId);
+            return appointments.stream().map(this::mapToAppointmentResponse).toList();
+        }
+        if(currentLoggedUser.getRole() != Role.PATIENT || currentLoggedUser.getPatient() == null || !currentLoggedUser.getPatient().getId().equals(patientId) ){
+            throw new BusinessRuleViolationException("Unauthorized ...Only Patient can see their appointments");
+        }
         List<Appointment> appointments = appointmentRepository.findAllByPatientId(patientId);
+
         return appointments.stream().map(this::mapToAppointmentResponse).toList();
     }
 
     public AppointmentResponse getAppointmentById(Long appointmentId) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        User currentLoggedUser = (User) authentication.getPrincipal();
         Appointment appointment = appointmentRepository.findById(appointmentId).orElseThrow(() ->
                 new AppointmentNotFoundException("Appointment not found with given id "+appointmentId));
-        return mapToAppointmentResponse(appointment);
+
+        if(currentLoggedUser.getRole() == Role.ADMIN){
+            return mapToAppointmentResponse(appointment);
+        }
+        if(currentLoggedUser.getRole() == Role.PATIENT  && currentLoggedUser.getPatient() != null){
+            if(!currentLoggedUser.getPatient().getId().equals(appointment.getPatient().getId())){
+                throw new BusinessRuleViolationException
+                        ("Only Patient with id: "+appointment.getPatient().getId()+" can see appointments");
+            }
+            return mapToAppointmentResponse(appointment);
+        }
+        if (currentLoggedUser.getRole() == Role.DOCTOR && currentLoggedUser.getDoctor() != null){
+            if(!currentLoggedUser.getDoctor().getId().equals(appointment.getDoctor().getId())){
+                throw new BusinessRuleViolationException
+                        ("Only Doctor with id: "+appointment.getDoctor().getId()+" can see appointments");
+            }
+            return mapToAppointmentResponse(appointment);
+        }
+
+        throw new BusinessRuleViolationException(
+                "Unauthorized: you cannot access this appointment"
+        );
     }
 
     public List<AppointmentResponse> getAllAppointmentByDoctorId(Long doctorId) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        User currentLoggedUser = (User) authentication.getPrincipal();
+        if(currentLoggedUser.getRole() == Role.ADMIN){
+            List<Appointment> appointments = appointmentRepository.findByDoctorId(doctorId);
+            return appointments.stream().map(this::mapToAppointmentResponse).toList();
+        }
+        if(currentLoggedUser.getRole() != Role.DOCTOR || currentLoggedUser.getDoctor() == null
+                || !currentLoggedUser.getDoctor().getId().equals(doctorId)){
+            throw new BusinessRuleViolationException("Unauthorize .. Only doctor can see their appointments");
+        }
         List<Appointment> appointments = appointmentRepository.findByDoctorId(doctorId);
         return appointments.stream().map(this::mapToAppointmentResponse).toList();
     }
 
     public List<AppointmentResponse> getAppointmentByStatus(String status) {
-        AppointmentStatus appointmentStatus = AppointmentStatus.valueOf(status.toUpperCase());
-        List<Appointment> appointments = appointmentRepository.findByStatus(appointmentStatus);
-        return appointments.stream().map(this::mapToAppointmentResponse).toList();
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        User currentLoggedUser = (User) authentication.getPrincipal();
+        AppointmentStatus appointmentStatus;
+        try {
+            appointmentStatus = AppointmentStatus.valueOf(status.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new BusinessRuleViolationException(
+                    "Invalid appointment status: " + status
+            );
+        }
+        if(currentLoggedUser.getRole() == Role.ADMIN){
+            List<Appointment> appointments = appointmentRepository.findByStatus(appointmentStatus);
+            return appointments.stream().map(this::mapToAppointmentResponse).toList();
+        }
+
+        if(currentLoggedUser.getRole() == Role.PATIENT && currentLoggedUser.getPatient() != null){
+            List<Appointment> appointments =
+                    appointmentRepository.findByPatientIdAndStatus(currentLoggedUser.getPatient().getId(),appointmentStatus);
+            return appointments.stream().map(this::mapToAppointmentResponse).toList();
+        }
+        if (currentLoggedUser.getRole() == Role.DOCTOR && currentLoggedUser.getDoctor() != null){
+            List<Appointment> appointments =
+                    appointmentRepository.findByDoctorIdAndStatus(currentLoggedUser.getDoctor().getId(),appointmentStatus);
+            return appointments.stream().map(this::mapToAppointmentResponse).toList();
+        }
+
+        throw new BusinessRuleViolationException(
+                "Unauthorized: you cannot access this appointment"
+        );
+
     }
 
 }
