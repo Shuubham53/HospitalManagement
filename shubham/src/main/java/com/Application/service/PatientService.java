@@ -6,25 +6,22 @@ import com.Application.dto.PatientResponse;
 import com.Application.entity.Appointment;
 import com.Application.entity.Patient;
 import com.Application.entity.User;
-import com.Application.entity.type.AppointmentStatus;
 import com.Application.entity.type.Role;
+import com.Application.error.BusinessRuleViolationException;
 import com.Application.error.PatientNotFoundException;
 import com.Application.repository.AppointmentRepository;
 import com.Application.repository.PatientRepository;
 import com.Application.repository.UserRepository;
-import com.fasterxml.jackson.annotation.JsonFormat;
-import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.transaction.annotation.Transactional;
 
-import org.springframework.cache.annotation.CachePut;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -35,6 +32,8 @@ public class PatientService {
     private final PatientRepository patientRepository;
     private final AppointmentRepository appointmentRepository;
     private final PasswordEncoder passwordEncoder;
+
+    @Transactional
     public PatientResponse createPatient(PatientRequest request) {
         if (userRepository.existsByUsername(request.getEmail())) {
             throw new IllegalArgumentException("Email already exists");
@@ -52,33 +51,52 @@ public class PatientService {
         return toDto(patient);
     }
 
-    @Cacheable(value = "patients",key = "#patientId")
-    public PatientResponse getPateintById(Long patientId){
+    public PatientResponse getPatientById(Long patientId){
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        User currentLoggedUser = (User) authentication.getPrincipal();
+
+       if(currentLoggedUser.getRole() != Role.ADMIN){
+
+           if(currentLoggedUser.getRole() !=  Role.PATIENT || currentLoggedUser.getPatient() == null || !currentLoggedUser.getPatient().getId().equals(patientId)){
+               throw new BusinessRuleViolationException
+                       ("Only patient with id "+patientId+" can access");
+           }
+       }
         Patient patient = patientRepository.findById(patientId)
-            .orElseThrow(() -> new PatientNotFoundException("Patient not found with tghis id"));
+                .orElseThrow(() -> new PatientNotFoundException("Patient not found with id: "+patientId));
         return toDto(patient);
+
     }
     @Cacheable(value = "patients")
     public List<PatientResponse> getAllPatient() {
+        User currentLoggedUser = (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        if(currentLoggedUser.getRole() != Role.ADMIN){
+            throw new BusinessRuleViolationException("Unauthorize.. only admin can access");
+        }
         log.info("fetching all patients from database");
-        List<Patient> patients = patientRepository.findAll();
+        List<Patient> patients = patientRepository.findByUser_ActiveTrue();
         List<PatientResponse> responses = patients.stream()
                 .map(this::toDto).toList();
         return responses;
     }
 
-    @Cacheable(value = "patients")
     public PatientResponse getCurrentPatient() {
         User currentUser = (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        if(currentUser.getRole() != Role.PATIENT){
+            throw new BusinessRuleViolationException("Unauthorize.. only patient can access");
+        }
         Patient patient = currentUser.getPatient();
         if (patient == null) throw new PatientNotFoundException("Patient profile missing");
         PatientResponse response = toDto(patient);
         return response;
     }
-    @CachePut(value = "patients",key = "#result.id")
     @Transactional
     public PatientResponse updatePatient(PatientRequest request) {
         User currentUser =  (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+
+        if(currentUser.getRole() != Role.PATIENT){
+            throw new BusinessRuleViolationException("Unauthorize.. only patient can update");
+        }
 
         Patient patient = currentUser.getPatient();
 
@@ -103,12 +121,24 @@ public class PatientService {
         return toDto(patient);
     }
 
+    @Transactional
     public void deletePatient(Long id) {
+        User currentUser =  (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+
+        if(currentUser.getRole() != Role.ADMIN){
+            if(currentUser.getRole() != Role.PATIENT){
+                throw new BusinessRuleViolationException("Unauthorize.. you don't have access to delete patient");
+            }
+            if(currentUser.getPatient() == null || !currentUser.getPatient().getId().equals(id)){
+                throw new BusinessRuleViolationException("Only patient with id "+id+" can delete ");
+            }
+        }
+
         Patient patient = patientRepository.findById(id).orElseThrow(() ->
                 new PatientNotFoundException("Patient Not found for deletion"));
         User user = patient.getUser();
-        userRepository.delete(user);
-        patientRepository.delete(patient);
+        user.setActive(false);
+        userRepository.save(user);
     }
 
     public List<AppointmentPatientResponse> getMyAppointments() {

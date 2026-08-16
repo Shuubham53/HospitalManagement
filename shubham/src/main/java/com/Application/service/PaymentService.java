@@ -47,9 +47,13 @@ public class PaymentService {
     public PaymentResponse createPaymentIntent(PaymentRequest request) {
         log.info("Creating payment intent for bill ID: {}", request.getBillId());
 
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        User currentLoggedUser = (User)authentication.getPrincipal();
-        Patient patient = currentLoggedUser.getPatient();
+        User currentuser = (User)SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        if (currentuser.getRole() != Role.PATIENT) {
+            throw new BusinessRuleViolationException(
+                    "Only patients can create payment"
+            );
+        }
+        Patient patient = currentuser.getPatient();
 
         if (patient == null) {
             throw new PatientNotFoundException(
@@ -57,7 +61,7 @@ public class PaymentService {
             );
         }
 
-        Long patientId = currentLoggedUser.getPatient().getId();
+        Long patientId = currentuser.getPatient().getId();
 
         Billing billing = billingService.getBillingEntity(request.getBillId());
         Long billingPatientId = billing.getPatient().getId();
@@ -70,9 +74,7 @@ public class PaymentService {
             throw new IllegalStateException("Cannot create payment intent. Bill status: " + billing.getStatus());
         }
 
-        if(billing.getReferenceNumber() != null && billing.getStatus() == PaymentStatus.CREATED){
-            throw new IllegalStateException("Payment already initiated for this bill");
-        }
+
         if (billing.getAmount() == null ||
                 billing.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
             throw new BusinessRuleViolationException(

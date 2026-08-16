@@ -38,9 +38,9 @@ public class DoctorController {
     }
 
     @DeleteMapping("/doctor/{doctorId}")
-    public ResponseEntity<String> deleteDoctor(@PathVariable Long doctorId){
+    public ResponseEntity<Void> deleteDoctor(@PathVariable Long doctorId) {
         doctorService.deleteDoctor(doctorId);
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Doctor has been deleted..✅");
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/doctor/appointments")

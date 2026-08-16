@@ -59,7 +59,7 @@ public class DoctorService {
                 .build();
     }
     public List<DoctorResponse> getAllDoctor() {
-        List<Doctor> doctors = doctorRepository.findAll();
+        List<Doctor> doctors = doctorRepository.findByUser_ActiveTrue();
         List<DoctorResponse> responses = doctors.stream()
                 .map(this::mapToResponse).toList();
         return responses;
@@ -99,18 +99,25 @@ public class DoctorService {
 
     @Transactional
     public void deleteDoctor(Long doctorId) {
+        User currentUser =  (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+
+        if(currentUser.getRole() != Role.ADMIN){
+            if(currentUser.getRole() != Role.DOCTOR){
+                throw new BusinessRuleViolationException("Unauthorize.. you don't have access to delete doctor");
+            }
+            if(currentUser.getDoctor() == null || !currentUser.getDoctor().getId().equals(doctorId)){
+                throw new BusinessRuleViolationException("Only doctor with id "+doctorId+" can delete ");
+            }
+        }
+
 
         Doctor doctor = doctorRepository.findById(doctorId).orElseThrow(
                 () -> new DoctorNotFoundException("Doctor Not found with Id: "+doctorId)
         );
 
-        List<Appointment> appointments = appointmentRepository.findByDoctorId(doctor.getId());
-        if(!appointments.isEmpty()){
-            throw new BusinessRuleViolationException("You cannot delete doctor with id: "+doctor.getId()+"it has appointment records");
-        }
         User user = doctor.getUser();
-        doctorRepository.delete(doctor);
-        userRepository.delete(user);
+        user.setActive(false);
+        userRepository.save(user);
     }
 
     public Doctor mapToEntity(DoctorRequest request,User user){
@@ -147,7 +154,7 @@ public class DoctorService {
     }
     public List<DoctorResponse> getDoctorBySpecialization(String name) {
 
-        List<Doctor> doctors = doctorRepository.findBySpecialization(name);
+        List<Doctor> doctors = doctorRepository.findBySpecializationAndUser_ActiveTrue(name);
         List<DoctorResponse> responses = doctors.stream()
                 .map(this::mapToResponse).toList();
         return responses;

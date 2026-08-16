@@ -44,12 +44,20 @@ public class User implements UserDetails{
     @JsonIgnore
     private Doctor doctor;
 
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean active = true;
+
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
         return List.of(
                 new SimpleGrantedAuthority("ROLE_" + role.name())
         );
+    }
+    @Override
+    public boolean isEnabled() {
+        return active;
     }
 
 }
