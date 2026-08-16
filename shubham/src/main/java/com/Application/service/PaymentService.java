@@ -4,11 +4,14 @@ import com.Application.dto.PaymentRequest;
 import com.Application.dto.PaymentResponse;
 import com.Application.dto.RefundRequest;
 import com.Application.entity.Billing;
+import com.Application.entity.Patient;
 import com.Application.entity.User;
 import com.Application.entity.type.PaymentMethod;
 import com.Application.entity.type.PaymentStatus;
+import com.Application.entity.type.Role;
 import com.Application.error.BillNotFoundException;
 import com.Application.error.BusinessRuleViolationException;
+import com.Application.error.PatientNotFoundException;
 import com.Application.repository.BillingRepository;
 import com.stripe.exception.StripeException;
 import com.stripe.model.PaymentIntent;
@@ -46,6 +49,14 @@ public class PaymentService {
 
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         User currentLoggedUser = (User)authentication.getPrincipal();
+        Patient patient = currentLoggedUser.getPatient();
+
+        if (patient == null) {
+            throw new PatientNotFoundException(
+                    "Patient profile not found for current user"
+            );
+        }
+
         Long patientId = currentLoggedUser.getPatient().getId();
 
         Billing billing = billingService.getBillingEntity(request.getBillId());
@@ -252,8 +263,22 @@ public class PaymentService {
     }
 
     public Billing getBillingByPaymentIntent(String paymentIntentId) {
-        return billingRepository.findByReferenceNumber(paymentIntentId)
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        User currentLoggeduser = (User) authentication.getPrincipal();
+        Billing billing =  billingRepository.findByReferenceNumber(paymentIntentId)
                 .orElseThrow(() -> new BillNotFoundException(
                         "No billing found for payment intent: " + paymentIntentId));
+
+        if(currentLoggeduser.getRole() == Role.ADMIN){
+            return billing;
+        }
+        if(currentLoggeduser.getRole() != Role.PATIENT
+                || currentLoggeduser.getPatient() == null
+                || currentLoggeduser.getPatient().getId().equals(billing.getPatient().getId())){
+            throw new BusinessRuleViolationException(
+                    "Unauthorized: you cannot access this billing"
+            );
+        }
+        return billing;
     }
 }
