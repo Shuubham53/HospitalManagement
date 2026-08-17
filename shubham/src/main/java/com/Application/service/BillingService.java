@@ -3,15 +3,15 @@ package com.Application.service;
 import com.Application.dto.BillingResponse;
 import com.Application.entity.Appointment;
 import com.Application.entity.Billing;
-import com.Application.entity.type.AppointmentStatus;
-import com.Application.entity.type.AppointmentType;
-import com.Application.entity.type.PaymentMethod;
-import com.Application.entity.type.PaymentStatus;
+import com.Application.entity.User;
+import com.Application.entity.type.*;
 import com.Application.error.BillNotFoundException;
+import com.Application.error.BusinessRuleViolationException;
 import com.Application.repository.BillingRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -84,22 +84,51 @@ public class BillingService {
     public BillingResponse getBillById(Long id) {
         Billing billing = billingRepository.findById(id).orElseThrow(() ->
                 new BillNotFoundException("Bill not found with id "+id));
+        validateBillingAccess(billing);
         return mapToBillingResponse(billing);
     }
 
     public List<BillingResponse> getAllBills() {
+
+        User currentUser = (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+
+        if (currentUser.getRole() != Role.ADMIN) {
+            throw new BusinessRuleViolationException("Unauthorized: only admin can access all bills");
+        }
         List<Billing> billings = billingRepository.findAll();
         return billings.stream()
                 .map(this::mapToBillingResponse).toList();
     }
 
     public List<BillingResponse> getBillsByStatus(String status) {
-        PaymentStatus paymentStatus = PaymentStatus.valueOf(status.toUpperCase());
+
+        PaymentStatus paymentStatus;
+        try {
+            paymentStatus = PaymentStatus.valueOf(status.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new BusinessRuleViolationException(
+                    "Invalid Payment status: " + status
+            );
+        }
         List<Billing> billings = billingRepository.findByStatus(paymentStatus);
         return billings.stream().map(this::mapToBillingResponse).toList();
     }
 
     public List<BillingResponse> getBillsByPatientId(Long patientId) {
+        User currentUser =
+                (User) SecurityContextHolder.getContext()
+                        .getAuthentication()
+                        .getPrincipal();
+
+        if (currentUser.getRole() != Role.ADMIN
+                && !(currentUser.getRole() == Role.PATIENT
+                && currentUser.getPatient() != null
+                && currentUser.getPatient().getId().equals(patientId))) {
+
+            throw new BusinessRuleViolationException(
+                    "Unauthorized: you cannot access these bills"
+            );
+        }
         List<Billing> billings = billingRepository.findByPatientId(patientId);
         return billings.stream().map(this::mapToBillingResponse).toList();
     }
@@ -107,14 +136,16 @@ public class BillingService {
     public BillingResponse getBillsByReferenceId(String referenceId) {
         Billing billings = billingRepository.findByReferenceNumber(referenceId).orElseThrow(() ->
                 new BillNotFoundException("Bill not found with reference number "+referenceId));
+        validateBillingAccess(billings);
         return mapToBillingResponse(billings);
     }
 
-    // Renamed for cash payments only
+
     public BillingResponse payBillCash(Long billId) {
         Billing billing = billingRepository.findById(billId).orElseThrow(() ->
                 new BillNotFoundException("Bill not found for payment"));
 
+        validateBillingAccess(billing);
         if(billing.getStatus() != PaymentStatus.UNPAID){
             throw new IllegalStateException("Bill has been already paid or refunded");
         }
@@ -135,6 +166,7 @@ public class BillingService {
 
 
 
+
     // Helper method for PaymentService
     public Billing getBillingByAppointment(Appointment appointment) {
         return billingRepository.findByAppointment(appointment)
@@ -144,5 +176,25 @@ public class BillingService {
     public Billing getBillingEntity(Long billId) {
         return billingRepository.findById(billId)
                 .orElseThrow(() -> new BillNotFoundException("Bill not found with id " + billId));
+    }
+
+    private void validateBillingAccess(Billing billing) {
+
+        User currentUser = (User) SecurityContextHolder.getContext()
+                        .getAuthentication().getPrincipal();
+
+        if (currentUser.getRole() == Role.ADMIN) {
+            return;
+        }
+
+        if (currentUser.getRole() == Role.PATIENT
+                && currentUser.getPatient() != null
+                && currentUser.getPatient().getId().equals(billing.getPatient().getId())) {
+            return;
+        }
+
+        throw new BusinessRuleViolationException(
+                "Unauthorized: you cannot access this billing"
+        );
     }
 }

@@ -18,4 +18,5 @@ import java.time.LocalDateTime;
 public class UserResponse {
     private Long userId;
     private String jwtToken;
+    private String refreshToken;
 }

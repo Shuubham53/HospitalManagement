@@ -37,14 +37,7 @@ public class JwtFilter extends OncePerRequestFilter {
             User user = userRepository.findByUsernameAndActiveTrue(username).orElseThrow(() ->
                             new IllegalArgumentException("User not found with username: " + username));
 
-            if (!user.isEnabled()) {
-                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                response.setContentType("application/json");
-                response.getWriter().write(
-                        "{\"error\":\"Account is inactive\"}"
-                );
-                return;
-            }
+
             UsernamePasswordAuthenticationToken authenticationToken =
                     new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities());
             SecurityContextHolder.getContext()

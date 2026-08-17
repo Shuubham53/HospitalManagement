@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.boot.context.config.ConfigDataResourceNotFoundException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -33,6 +34,7 @@ public class InventoryService {
         inventoryRepository.save(inventory);
         return mapToInventoryResponse(inventory);
     }
+    @Transactional
     public InventoryStatus calculateStatus(Integer quantity, Integer reorderLevel, LocalDate expirationTime){
 
         if  (expirationTime != null &&
@@ -49,6 +51,7 @@ public class InventoryService {
         return InventoryStatus.AVAILABLE;
     }
 
+    @Transactional
     @Scheduled(cron = "0 0 0 * * *")
     public void updateExpiredInventory(){
         List<Inventory> inventories =
