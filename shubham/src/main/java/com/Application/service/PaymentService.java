@@ -47,13 +47,13 @@ public class PaymentService {
     public PaymentResponse createPaymentIntent(PaymentRequest request) {
         log.info("Creating payment intent for bill ID: {}", request.getBillId());
 
-        User currentuser = (User)SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        if (currentuser.getRole() != Role.PATIENT) {
+        User currentUser = (User)SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        if (currentUser.getRole() != Role.PATIENT) {
             throw new BusinessRuleViolationException(
                     "Only patients can create payment"
             );
         }
-        Patient patient = currentuser.getPatient();
+        Patient patient = currentUser.getPatient();
 
         if (patient == null) {
             throw new PatientNotFoundException(
@@ -61,7 +61,7 @@ public class PaymentService {
             );
         }
 
-        Long patientId = currentuser.getPatient().getId();
+        Long patientId = currentUser.getPatient().getId();
 
         Billing billing = billingService.getBillingEntity(request.getBillId());
         Long billingPatientId = billing.getPatient().getId();
@@ -126,6 +126,10 @@ public class PaymentService {
     @Transactional
     public Billing confirmPayment(String paymentIntentId) {
         log.info("Confirming payment for payment intent: {}", paymentIntentId);
+        Authentication authentication =
+                SecurityContextHolder.getContext().getAuthentication();
+
+        User currentUser = (User) authentication.getPrincipal();
 
         try {
             PaymentIntent paymentIntent = PaymentIntent.retrieve(paymentIntentId);
@@ -155,6 +159,14 @@ public class PaymentService {
             if (!patientId.equals(billing.getPatient().getId())) {
                 throw new BusinessRuleViolationException(
                         "Payment intent does not belong to this patient"
+                );
+            }
+            if (currentUser.getRole() != Role.PATIENT
+                    || currentUser.getPatient() == null
+                    || !currentUser.getPatient().getId().equals(billing.getPatient().getId())) {
+
+                throw new BusinessRuleViolationException(
+                        "Unauthorized: you cannot confirm this payment"
                 );
             }
 
@@ -217,6 +229,16 @@ public class PaymentService {
     @Transactional
     public Billing refundPayment(RefundRequest request) {
         log.info("Processing refund for payment intent: {}", request.getPaymentIntentId());
+        Authentication authentication =
+                SecurityContextHolder.getContext().getAuthentication();
+
+        User currentUser = (User) authentication.getPrincipal();
+
+        if (currentUser.getRole() != Role.ADMIN) {
+            throw new BusinessRuleViolationException(
+                    "Only admin can process refunds"
+            );
+        }
 
         Billing billing = billingRepository.findByReferenceNumber(request.getPaymentIntentId())
                 .orElseThrow(() -> new BillNotFoundException(
@@ -264,6 +286,112 @@ public class PaymentService {
         }
     }
 
+    @Transactional
+    public Billing processWebhookPayment(String paymentIntentId) {
+        log.info("Processing Stripe webhook for payment intent: {}", paymentIntentId);
+
+        try {
+            PaymentIntent paymentIntent = PaymentIntent.retrieve(paymentIntentId);
+
+            String metadataBillingId = paymentIntent.getMetadata().get("billingId");
+            String metadataPatientId = paymentIntent.getMetadata().get("patientId");
+
+            if (metadataBillingId == null || metadataPatientId == null) {
+                throw new BusinessRuleViolationException(
+                        "Payment intent metadata is invalid"
+                );
+            }
+
+            Long billingId = Long.valueOf(metadataBillingId);
+            Long patientId = Long.valueOf(metadataPatientId);
+
+            Billing billing = billingRepository.findByReferenceNumber(paymentIntentId)
+                    .orElseThrow(() -> new BillNotFoundException(
+                            "No billing found for payment intent: " + paymentIntentId
+                    ));
+
+            if (!billingId.equals(billing.getId())) {
+                throw new BusinessRuleViolationException(
+                        "Payment intent does not belong to this billing"
+                );
+            }
+
+            if (!patientId.equals(billing.getPatient().getId())) {
+                throw new BusinessRuleViolationException(
+                        "Payment intent does not belong to this patient"
+                );
+            }
+
+            BigDecimal paidAmount = BigDecimal.valueOf(paymentIntent.getAmount())
+                    .divide(BigDecimal.valueOf(100));
+
+            if (billing.getAmount().compareTo(paidAmount) != 0) {
+                throw new BusinessRuleViolationException(
+                        "Payment amount does not match billing amount"
+                );
+            }
+
+            if (!defaultCurrency.equalsIgnoreCase(paymentIntent.getCurrency())) {
+                throw new BusinessRuleViolationException(
+                        "Payment currency does not match billing currency"
+                );
+            }
+
+            // Idempotency: webhook can be delivered more than once
+            if (billing.getStatus() == PaymentStatus.PAID ||
+                    billing.getStatus() == PaymentStatus.REFUNDED) {
+                return billing;
+            }
+
+            switch (paymentIntent.getStatus()) {
+
+                case "succeeded":
+                    billing.setStatus(PaymentStatus.PAID);
+                    billing.setPaidAt(LocalDateTime.now());
+                    log.info(
+                            "Webhook: payment succeeded for bill ID: {}",
+                            billing.getId()
+                    );
+                    break;
+
+                case "processing":
+                    billing.setStatus(PaymentStatus.PENDING);
+                    break;
+
+                case "canceled":
+                    billing.setStatus(PaymentStatus.CANCELLED);
+                    billing.setReferenceNumber(null);
+                    break;
+
+                case "requires_payment_method":
+                case "requires_confirmation":
+                case "requires_action":
+                    billing.setStatus(PaymentStatus.PENDING);
+                    break;
+
+                default:
+                    billing.setStatus(PaymentStatus.FAILED);
+                    billing.setReferenceNumber(null);
+                    log.warn(
+                            "Webhook: payment failed for bill ID {}, status {}",
+                            billing.getId(),
+                            paymentIntent.getStatus()
+                    );
+            }
+
+            return billingRepository.save(billing);
+
+        } catch (StripeException e) {
+            log.error(
+                    "Stripe error while processing webhook payment: {}",
+                    e.getMessage()
+            );
+            throw new IllegalStateException(
+                    "Failed to process webhook payment",
+                    e
+            );
+        }
+    }
     public Billing getBillingByPaymentIntent(String paymentIntentId) {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         User currentLoggeduser = (User) authentication.getPrincipal();
@@ -276,7 +404,7 @@ public class PaymentService {
         }
         if(currentLoggeduser.getRole() != Role.PATIENT
                 || currentLoggeduser.getPatient() == null
-                || currentLoggeduser.getPatient().getId().equals(billing.getPatient().getId())){
+                || !currentLoggeduser.getPatient().getId().equals(billing.getPatient().getId())){
             throw new BusinessRuleViolationException(
                     "Unauthorized: you cannot access this billing"
             );

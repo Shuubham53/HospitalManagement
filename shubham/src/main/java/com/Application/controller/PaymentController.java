@@ -12,11 +12,13 @@ import com.stripe.exception.SignatureVerificationException;
 import com.stripe.model.Event;
 import com.stripe.model.PaymentIntent;
 import com.stripe.net.Webhook;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @Slf4j
@@ -31,46 +33,28 @@ public class PaymentController {
     @Value("${stripe.webhook.secret}")
     private String webhookSecret;
 
+    @PreAuthorize("hasRole('PATIENT')")
     @PostMapping("/create-payment-intent")
-    public ResponseEntity<?> createPaymentIntent(@RequestBody PaymentRequest request) {
-        try {
-            log.info("Received payment intent creation request for bill ID: {}", request.getBillId());
-            PaymentResponse response = paymentService.createPaymentIntent(request);
-            return ResponseEntity.ok(response);
-        } catch (Exception e) {
-            log.error("Error creating payment intent: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body("Payment error: " + e.getMessage());
-        }
+    public ResponseEntity<PaymentResponse> createPaymentIntent(@Valid @RequestBody PaymentRequest request) {
+        log.info("Received payment intent creation request for bill ID: {}", request.getBillId());
+        PaymentResponse response = paymentService.createPaymentIntent(request);
+        return ResponseEntity.ok(response);
     }
 
-//    @PostMapping("/confirm")
-//    public ResponseEntity<?> confirmPayment(@RequestBody PaymentConfirmRequest request) {
-//        try {
-//            log.info("Received payment confirmation request for payment intent: {}",
-//                    request.getPaymentIntentId());
-//            Billing billing = paymentService.confirmPayment(request.getPaymentIntentId());
-//            return ResponseEntity.ok(billingService.mapToBillingResponse(billing));
-//        } catch (Exception e) {
-//            log.error("Error confirming payment: {}", e.getMessage());
-//            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-//                    .body("Payment confirmation error: " + e.getMessage());
-//        }
-//    }
-
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping("/refund")
-    public ResponseEntity<?> refundPayment(@RequestBody RefundRequest request) {
+    public ResponseEntity<?> refundPayment(@Valid @RequestBody RefundRequest request) {
         try {
             log.info("Received refund request for payment intent: {}", request.getPaymentIntentId());
             Billing billing = paymentService.refundPayment(request);
             return ResponseEntity.ok(billingService.mapToBillingResponse(billing));
         } catch (Exception e) {
             log.error("Error processing refund: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body("Refund error: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Refund error: " + e.getMessage());
         }
     }
 
+    @PreAuthorize("hasAnyRole('ADMIN', 'PATIENT')")
     @GetMapping("/billing/{paymentIntentId}")
     public ResponseEntity<?> getBillingByPaymentIntent(@PathVariable String paymentIntentId) {
         try {
@@ -78,8 +62,7 @@ public class PaymentController {
             return ResponseEntity.ok(billingService.mapToBillingResponse(billing));
         } catch (Exception e) {
             log.error("Error retrieving billing: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body("Billing not found: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Billing not found: " + e.getMessage());
         }
     }
 
@@ -101,7 +84,7 @@ public class PaymentController {
                     PaymentIntent paymentIntent = (PaymentIntent) event.getDataObjectDeserializer()
                             .getObject().orElse(null);
                     if (paymentIntent != null) {
-                        paymentService.confirmPayment(paymentIntent.getId());
+                        paymentService.processWebhookPayment(paymentIntent.getId());
                         log.info("Payment succeeded webhook processed: {}", paymentIntent.getId());
                     }
                     break;
@@ -110,7 +93,7 @@ public class PaymentController {
                     PaymentIntent failedIntent = (PaymentIntent) event.getDataObjectDeserializer()
                             .getObject().orElse(null);
                     if (failedIntent != null) {
-                        paymentService.confirmPayment(failedIntent.getId());
+                        paymentService.processWebhookPayment(failedIntent.getId());
                         log.warn("Payment failed webhook processed: {}", failedIntent.getId());
                     }
                     break;
@@ -119,7 +102,7 @@ public class PaymentController {
                     PaymentIntent canceledIntent = (PaymentIntent) event.getDataObjectDeserializer()
                             .getObject().orElse(null);
                     if (canceledIntent != null) {
-                        paymentService.confirmPayment(canceledIntent.getId());
+                        paymentService.processWebhookPayment(canceledIntent.getId());
                         log.info("Payment canceled webhook processed: {}", canceledIntent.getId());
                     }
                     break;

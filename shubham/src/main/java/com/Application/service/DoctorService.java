@@ -3,9 +3,7 @@ package com.Application.service;
 import com.Application.dto.*;
 import com.Application.entity.Appointment;
 import com.Application.entity.Doctor;
-import com.Application.entity.Patient;
 import com.Application.entity.User;
-import com.Application.entity.type.AppointmentStatus;
 import com.Application.entity.type.Role;
 import com.Application.error.BusinessRuleViolationException;
 import com.Application.error.DoctorNotFoundException;
@@ -14,13 +12,14 @@ import com.Application.repository.AppointmentRepository;
 import com.Application.repository.DoctorRepository;
 import com.Application.repository.UserRepository;
 
+import jakarta.validation.Valid;
 import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
-import org.apache.catalina.security.SecurityUtil;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.bind.annotation.RequestBody;
 
 import javax.print.Doc;
 import java.time.LocalDateTime;
@@ -35,7 +34,7 @@ public class DoctorService {
     private final AppointmentRepository appointmentRepository;
 
     @Transactional
-    public DoctorResponse createDoctor(DoctorRequest request) {
+    public DoctorResponse createDoctor(@Valid @RequestBody DoctorRequest request) {
 
         if(userRepository.existsByUsername(request.getEmail())){
             throw new  EmailAlreadyExistException("User already exist with email: "+request.getEmail());
@@ -66,12 +65,17 @@ public class DoctorService {
     }
 
     public DoctorResponse getCurrentDoctorProfile() {
-        Authentication authentication =  SecurityContextHolder.getContext().getAuthentication();
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         User currentUser = (User) authentication.getPrincipal();
+
+        if (currentUser.getRole() != Role.DOCTOR) {
+            throw new BusinessRuleViolationException("Unauthorized.. only doctor can access");
+        }
         Doctor doctor = currentUser.getDoctor();
-        if(doctor == null){
+        if (doctor == null) {
             throw new DoctorNotFoundException("Doctor profile missing");
         }
+
         return mapToResponse(doctor);
     }
     @Transactional
@@ -144,13 +148,18 @@ public class DoctorService {
 
 
     public List<AppointmentDoctorResponse> getMyAppointments() {
+
         User currentUser = (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        Doctor doctor = currentUser.getDoctor();
-        if(doctor == null){
-            throw new DoctorNotFoundException("Doctor profile missing  cant track appointment history");
+        if (currentUser.getRole() != Role.DOCTOR || currentUser.getDoctor() == null) {
+            throw new DoctorNotFoundException("Doctor profile missing");
         }
-        List<Appointment> appointment = appointmentRepository.findByDoctorId(doctor.getId());
-        return appointment.stream().map(this::mapToAppointmentResponse).toList();
+        Doctor doctor = currentUser.getDoctor();
+        List<Appointment> appointments =
+                appointmentRepository.findByDoctorId(doctor.getId());
+
+        return appointments.stream()
+                .map(this::mapToAppointmentResponse)
+                .toList();
     }
     public List<DoctorResponse> getDoctorBySpecialization(String name) {
 

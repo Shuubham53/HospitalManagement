@@ -12,6 +12,7 @@ import com.Application.error.PatientNotFoundException;
 import com.Application.repository.AppointmentRepository;
 import com.Application.repository.PatientRepository;
 import com.Application.repository.UserRepository;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,6 +22,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.bind.annotation.RequestBody;
 
 import java.util.List;
 
@@ -34,7 +36,7 @@ public class PatientService {
     private final PasswordEncoder passwordEncoder;
 
     @Transactional
-    public PatientResponse createPatient(PatientRequest request) {
+    public PatientResponse createPatient(@Valid @RequestBody PatientRequest request) {
         if (userRepository.existsByUsername(request.getEmail())) {
             throw new IllegalArgumentException("Email already exists");
         }
@@ -62,7 +64,7 @@ public class PatientService {
                        ("Only patient with id "+patientId+" can access");
            }
        }
-        Patient patient = patientRepository.findById(patientId)
+        Patient patient = patientRepository.findByIdAndUser_ActiveTrue(patientId)
                 .orElseThrow(() -> new PatientNotFoundException("Patient not found with id: "+patientId));
         return toDto(patient);
 
@@ -142,18 +144,19 @@ public class PatientService {
     }
 
     public List<AppointmentPatientResponse> getMyAppointments() {
-
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         User currentUser = (User) authentication.getPrincipal();
+
+        if (currentUser.getRole() != Role.PATIENT || currentUser.getPatient() == null) {
+            throw new PatientNotFoundException("Patient profile missing");
+        }
         Long patientId = currentUser.getPatient().getId();
         List<Appointment> appointments =
                 appointmentRepository.findAllByPatientId(patientId);
-        List<AppointmentPatientResponse> responses = appointments.stream()
+        return appointments.stream()
                 .map(this::toAppointmentDto)
                 .toList();
-        return responses;
     }
-
     public AppointmentPatientResponse toAppointmentDto(Appointment appointment){
        AppointmentPatientResponse response = AppointmentPatientResponse.builder()
                .id(appointment.getId())
