@@ -8,9 +8,10 @@ import com.Application.dto.RefundRequest;
 import com.Application.entity.Billing;
 import com.Application.service.BillingService;
 import com.Application.service.PaymentService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stripe.exception.SignatureVerificationException;
 import com.stripe.model.Event;
-import com.stripe.model.PaymentIntent;
 import com.stripe.net.Webhook;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -39,6 +40,19 @@ public class PaymentController {
         log.info("Received payment intent creation request for bill ID: {}", request.getBillId());
         PaymentResponse response = paymentService.createPaymentIntent(request);
         return ResponseEntity.ok(response);
+    }
+
+    @PreAuthorize("hasRole('PATIENT')")
+    @PostMapping("/confirm")
+    public ResponseEntity<?> confirmPayment(@Valid @RequestBody PaymentConfirmRequest request) {
+        try {
+            log.info("Received confirm request for payment intent: {}", request.getPaymentIntentId());
+            Billing billing = paymentService.confirmPayment(request.getPaymentIntentId());
+            return ResponseEntity.ok(billingService.mapToBillingResponse(billing));
+        } catch (Exception e) {
+            log.error("Error confirming payment: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Confirm error: " + e.getMessage());
+        }
     }
 
     @PreAuthorize("hasRole('ADMIN')")
@@ -73,39 +87,33 @@ public class PaymentController {
 
         log.info("Received webhook from Stripe");
 
+        Event event;
         try {
-            Event event = Webhook.constructEvent(payload, sigHeader, webhookSecret);
+            event = Webhook.constructEvent(payload, sigHeader, webhookSecret);
+        } catch (SignatureVerificationException e) {
+            log.error("Webhook signature verification failed: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid signature");
+        }
 
-            log.info("Webhook event type: {}", event.getType());
+        log.info("Webhook event type: {}", event.getType());
 
-            // Handle different event types
+        try {
             switch (event.getType()) {
                 case "payment_intent.succeeded":
-                    PaymentIntent paymentIntent = (PaymentIntent) event.getDataObjectDeserializer()
-                            .getObject().orElse(null);
-                    if (paymentIntent != null) {
-                        paymentService.processWebhookPayment(paymentIntent.getId());
-                        log.info("Payment succeeded webhook processed: {}", paymentIntent.getId());
-                    }
-                    break;
-
                 case "payment_intent.payment_failed":
-                    PaymentIntent failedIntent = (PaymentIntent) event.getDataObjectDeserializer()
-                            .getObject().orElse(null);
-                    if (failedIntent != null) {
-                        paymentService.processWebhookPayment(failedIntent.getId());
-                        log.warn("Payment failed webhook processed: {}", failedIntent.getId());
-                    }
-                    break;
+                case "payment_intent.canceled": {
+                    // raw event JSON, which is always reliable.
+                    String paymentIntentId = extractIdFromEvent(event);
 
-                case "payment_intent.canceled":
-                    PaymentIntent canceledIntent = (PaymentIntent) event.getDataObjectDeserializer()
-                            .getObject().orElse(null);
-                    if (canceledIntent != null) {
-                        paymentService.processWebhookPayment(canceledIntent.getId());
-                        log.info("Payment canceled webhook processed: {}", canceledIntent.getId());
+                    if (paymentIntentId == null) {
+                        log.error("Could not extract PaymentIntent ID from webhook event: {}", event.getId());
+                        break;
                     }
+
+                    paymentService.processWebhookPayment(paymentIntentId);
+                    log.info("{} webhook processed: {}", event.getType(), paymentIntentId);
                     break;
+                }
 
                 case "charge.refunded":
                     log.info("Refund webhook received");
@@ -117,13 +125,25 @@ public class PaymentController {
 
             return ResponseEntity.ok("Webhook received");
 
-        } catch (SignatureVerificationException e) {
-            log.error("Webhook signature verification failed: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid signature");
         } catch (Exception e) {
-            log.error("Error processing webhook: {}", e.getMessage());
+            log.error("Error processing webhook: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Webhook processing error");
         }
+    }
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    private String extractIdFromEvent(Event event) {
+        try {
+            String rawJson = event.getDataObjectDeserializer().getRawJson();
+            JsonNode node = objectMapper.readTree(rawJson);
+            if (node.has("id")) {
+                return node.get("id").asText();
+            }
+        } catch (Exception e) {
+            log.error("Failed to extract ID from webhook raw JSON", e);
+        }
+        return null;
     }
 }

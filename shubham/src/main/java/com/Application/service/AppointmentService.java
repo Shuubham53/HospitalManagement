@@ -135,14 +135,14 @@ public class AppointmentService {
         return mapToAppointmentResponse(appointment);
     }
     @Transactional
-    public AppointmentResponse cancelAppointment(CancellationRequest request) {
+    public AppointmentResponse cancelAppointment(Long appointmentId) {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         User curentLoggedUser = (User)authentication.getPrincipal();
 
         Long currentUserId = curentLoggedUser.getId();
 
-        Appointment appointment = appointmentRepository.findById(request.getAppointmentId()).orElseThrow(() ->
-                new AppointmentNotFoundException("Appointment not found with id "+request.getAppointmentId()+" to Cancel appointment"));
+    Appointment appointment = appointmentRepository.findById(appointmentId).orElseThrow(() ->
+                new AppointmentNotFoundException("Appointment not found with id "+appointmentId+" to Cancel appointment"));
 
         boolean isPatient = curentLoggedUser.getRole() == Role.PATIENT && appointment.getPatient().getUser().getId().equals(currentUserId);
         boolean isDoctor = curentLoggedUser.getRole() == Role.DOCTOR && appointment.getDoctor().getUser().getId().equals(currentUserId);

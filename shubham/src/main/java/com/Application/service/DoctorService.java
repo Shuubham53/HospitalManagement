@@ -13,6 +13,8 @@ import com.Application.repository.DoctorRepository;
 import com.Application.repository.UserRepository;
 
 import jakarta.validation.Valid;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.Authentication;
@@ -57,6 +59,7 @@ public class DoctorService {
                 .email(doctor.getEmail())
                 .build();
     }
+
     public List<DoctorResponse> getAllDoctor() {
         List<Doctor> doctors = doctorRepository.findByUser_ActiveTrue();
         List<DoctorResponse> responses = doctors.stream()
@@ -78,10 +81,12 @@ public class DoctorService {
 
         return mapToResponse(doctor);
     }
+
     @Transactional
     public DoctorResponse updateDoctor(DoctorRequest request) {
         User currentUser = (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         Doctor doctor = currentUser.getDoctor();
+
         if(doctor == null){
             throw new DoctorNotFoundException("Doctor profile missing for updating");
         }
@@ -90,12 +95,14 @@ public class DoctorService {
         doctor.setSchedule(request.getSchedule());
         doctor.setSpecialization(request.getSpecialization());
 
-        if(request.getEmail() != null && !request.getEmail().equals(doctor.getEmail())){
-           if(userRepository.existsByUsername(request.getEmail())){
-               throw new IllegalArgumentException("This email is already in use");
-           }
-           doctor.setEmail(request.getEmail());
-           doctor.getUser().setUsername(request.getEmail());
+        if (request.getEmail() != null && !request.getEmail().equals(doctor.getEmail())) {
+            if (userRepository.existsByUsername(request.getEmail())) {
+                throw new IllegalArgumentException("This email is already in use");
+            }
+            doctor.setEmail(request.getEmail());
+            User user = doctor.getUser();
+            user.setUsername(request.getEmail());
+            userRepository.save(user);
         }
         doctorRepository.save(doctor);
         return mapToResponse(doctor);
@@ -161,6 +168,7 @@ public class DoctorService {
                 .map(this::mapToAppointmentResponse)
                 .toList();
     }
+
     public List<DoctorResponse> getDoctorBySpecialization(String name) {
 
         List<Doctor> doctors = doctorRepository.findBySpecializationAndUser_ActiveTrue(name);

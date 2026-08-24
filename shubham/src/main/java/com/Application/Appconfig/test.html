@@ -9,17 +9,20 @@
 
 <form id="payment-form">
     <div id="card-element" style="border: 1px solid #ccc; padding: 10px; margin: 20px 0;"></div>
-    <button type="submit" style="background: #5469d4; color: white; border: none; padding: 12px 24px; width: 100%;">
-        Pay ₹800.00
+    <button type="submit" id="submit-btn" style="background: #5469d4; color: white; border: none; padding: 12px 24px; width: 100%;" disabled>
+        Loading...
     </button>
     <div id="error-message" style="color: red; margin-top: 10px;"></div>
     <div id="success-message" style="color: green; margin-top: 10px;"></div>
 </form>
 
 <script>
-    // Replace these with your actual values
-    const PUBLISHABLE_KEY = 'pk_test_51SsOhcBWofEcT6tmyxC2ffn0psnpyWWuX0OuVjjw6XGvdKIMxnkFup7AR8C8guRa5d5bQ6YGrGPnVIqJZn4qmGun001yQKyyOR';  // From application.properties
-    const CLIENT_SECRET = 'pi_3SsdnoBWofEcT6tm0S3mTCKO_secret_mnkRBBzvggvGIhyZGFYEHOxtb';    // From create-payment-intent response
+    // ---- CONFIG: adjust these for your setup ----
+    const PUBLISHABLE_KEY = 'pk_test_51SsOhcBWofEcT6tmyxC2ffn0psnpyWWuX0OuVjjw6XGvdKIMxnkFup7AR8C8guRa5d5bQ6YGrGPnVIqJZn4qmGun001yQKyyOR';
+    const API_BASE = 'http://localhost:8080'; // your Spring Boot base URL
+    const BILL_ID = 1; // replace with the bill you want to test against
+    const AUTH_TOKEN = 'eyJhbGciOiJIUzM4NCJ9.eyJ1c2VySWQiOjEsInR5cGUiOiJhY2Nlc3MiLCJzdWIiOiJyYWh1bC50ZXN0QGV4YW1wbGUuY29tIiwiaWF0IjoxNzg3MzA5ODAzLCJleHAiOjE3ODczMTEwMDN9.Pu41B3rEhEt34hbLN1ja3Gh7kk8F_qqbYlsyKC0M-dQSsephhozaqNvKoM2zVvcu';
+    // -----------------------------------------------
 
     const stripe = Stripe(PUBLISHABLE_KEY);
     const elements = stripe.elements();
@@ -27,18 +30,71 @@
     cardElement.mount('#card-element');
 
     const form = document.getElementById('payment-form');
+    const submitBtn = document.getElementById('submit-btn');
+    const errorEl = document.getElementById('error-message');
+    const successEl = document.getElementById('success-message');
+
+    let clientSecret = null;
+
+    // Fetch a fresh PaymentIntent on page load instead of hardcoding one
+    async function init() {
+        try {
+            const res = await fetch(`${API_BASE}/payments/create-payment-intent`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${AUTH_TOKEN}`
+                },
+                body: JSON.stringify({ billId: BILL_ID })
+            });
+
+            if (!res.ok) {
+                const text = await res.text();
+                throw new Error(`Failed to create payment intent: ${res.status} ${text}`);
+            }
+
+            const data = await res.json();
+            clientSecret = data.clientSecret;
+
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Pay ₹800.00';
+        } catch (err) {
+            errorEl.textContent = err.message;
+            submitBtn.textContent = 'Unavailable';
+        }
+    }
+
+    init();
+
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
 
-        const {error, paymentIntent} = await stripe.confirmCardPayment(CLIENT_SECRET, {
-            payment_method: {card: cardElement}
+        if (!clientSecret) {
+            errorEl.textContent = 'Payment not ready yet — please wait or reload.';
+            return;
+        }
+
+        errorEl.textContent = '';
+        successEl.textContent = '';
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Processing...';
+
+        const { error, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
+            payment_method: { card: cardElement }
         });
 
         if (error) {
-            document.getElementById('error-message').textContent = error.message;
+            errorEl.textContent = error.message;
+            // Only re-enable if it's a real failure (not "already succeeded")
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Pay ₹800.00';
         } else {
-            document.getElementById('success-message').textContent = '✅ Payment successful!';
+            successEl.textContent = '✅ Payment successful!';
+            submitBtn.textContent = 'Paid';
             console.log('Payment completed:', paymentIntent.id);
+
+            // Optionally: notify your backend to confirm/finalize the billing record
+            // await fetch(`${API_BASE}/payments/confirm`, { ... });
         }
     });
 </script>
